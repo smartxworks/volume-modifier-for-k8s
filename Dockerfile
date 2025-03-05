@@ -1,7 +1,7 @@
 FROM --platform=$BUILDPLATFORM golang:1.23 AS builder
 WORKDIR /go/src/github.com/awslabs/volume-modifier-for-k8s
 COPY go.* .
-ARG GOPROXY=direct
+ARG GOPROXY=https://goproxy.cn,direct
 RUN go mod download
 COPY . .
 ARG TARGETOS
