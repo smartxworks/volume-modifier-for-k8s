@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/kubernetes-csi/csi-lib-utils/connection"
 	"github.com/kubernetes-csi/csi-lib-utils/metrics"
 	"github.com/kubernetes-csi/csi-lib-utils/rpc"
@@ -37,13 +38,20 @@ func New(addr string, timeout time.Duration, metricsmanager metrics.CSIMetricsMa
 		return nil, fmt.Errorf("failed probing CSI driver: %w", err)
 	}
 
+	caps, err := rpc.GetControllerCapabilities(ctx, conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed getting controller capabilities: %v", err)
+	}
+
 	return &client{
-		conn: conn,
+		conn:                           conn,
+		supportsControllerModifyVolume: caps[csi.ControllerServiceCapability_RPC_MODIFY_VOLUME],
 	}, nil
 }
 
 type client struct {
-	conn *grpc.ClientConn
+	conn                           *grpc.ClientConn
+	supportsControllerModifyVolume bool
 }
 
 func (c *client) GetDriverName(ctx context.Context) (string, error) {
@@ -51,6 +59,10 @@ func (c *client) GetDriverName(ctx context.Context) (string, error) {
 }
 
 func (c *client) SupportsVolumeModification(ctx context.Context) error {
+	if c.supportsControllerModifyVolume {
+		return nil
+	}
+
 	cc := modifyrpc.NewModifyClient(c.conn)
 	req := &modifyrpc.GetCSIDriverModificationCapabilityRequest{}
 	_, err := cc.GetCSIDriverModificationCapability(ctx, req)
@@ -58,13 +70,24 @@ func (c *client) SupportsVolumeModification(ctx context.Context) error {
 }
 
 func (c *client) Modify(ctx context.Context, volumeID string, params, reqContext map[string]string) error {
-	cc := modifyrpc.NewModifyClient(c.conn)
-	req := &modifyrpc.ModifyVolumePropertiesRequest{
-		Name:       volumeID,
-		Parameters: params,
-		Context:    reqContext,
+	var err error
+	if c.supportsControllerModifyVolume {
+		cc := csi.NewControllerClient(c.conn)
+		req := &csi.ControllerModifyVolumeRequest{
+			VolumeId:          volumeID,
+			MutableParameters: params,
+			Secrets:           reqContext,
+		}
+		_, err = cc.ControllerModifyVolume(ctx, req)
+	} else {
+		cc := modifyrpc.NewModifyClient(c.conn)
+		req := &modifyrpc.ModifyVolumePropertiesRequest{
+			Name:       volumeID,
+			Parameters: params,
+			Context:    reqContext,
+		}
+		_, err = cc.ModifyVolumeProperties(ctx, req)
 	}
-	_, err := cc.ModifyVolumeProperties(ctx, req)
 	if err == nil {
 		klog.V(4).InfoS("Volume modification completed", "volumeID", volumeID)
 	}
