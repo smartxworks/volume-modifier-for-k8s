@@ -36,3 +36,6 @@ check-proto:
 	protoc --go_out=$(TMPDIR) --go_opt=paths=source_relative --go-grpc_out=$(TMPDIR) --go-grpc_opt=paths=source_relative $(PROTO_FILE)
 	diff -r $(TMPDIR) $(PROTO_GENERATED_FILES_PATH) || (printf "\nThe proto file seems to have been modified. PLease run `make proto`."; exit 1)
 	rm -rf $(TMPDIR)
+
+.PHONY: bin
+	mkdir -p bin
